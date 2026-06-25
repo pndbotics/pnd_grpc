@@ -1,0 +1,2 @@
+/usr/bin/ar qc ../../lib/libadam_command.a CMakeFiles/adam_command.dir/adam_command.cpp.o CMakeFiles/adam_command.dir/__/include/adam_control.pb.cc.o CMakeFiles/adam_command.dir/__/include/adam_control.grpc.pb.cc.o
+/usr/bin/ranlib ../../lib/libadam_command.a

@@ -1,0 +1,6 @@
+/home/pnd-humanoid/Documents/test/luchuang/Client/build/CMakeFiles/edit_cache.dir
+/home/pnd-humanoid/Documents/test/luchuang/Client/build/CMakeFiles/rebuild_cache.dir
+/home/pnd-humanoid/Documents/test/luchuang/Client/build/src/CMakeFiles/adam_command.dir
+/home/pnd-humanoid/Documents/test/luchuang/Client/build/src/CMakeFiles/adam_command_client.dir
+/home/pnd-humanoid/Documents/test/luchuang/Client/build/src/CMakeFiles/edit_cache.dir
+/home/pnd-humanoid/Documents/test/luchuang/Client/build/src/CMakeFiles/rebuild_cache.dir

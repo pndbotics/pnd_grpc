@@ -1,0 +1,7 @@
+{
+  "server": {
+    "ip": "192.168.31.76",
+    "port": 6666,
+    "comment": "ip 填写机器人 eth0/wlo 网卡 IP，启动 PndControl 后控制台会打印 gRPC client connect address"
+  }
+}
