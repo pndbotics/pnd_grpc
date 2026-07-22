@@ -12,6 +12,8 @@
 namespace adam_control {
 
 constexpr int kGrpcConnectTimeoutSec = 5;
+constexpr double kControlModePollTimeoutSec = 60.0;
+constexpr double kControlModePollIntervalSec = 0.5;
 
 std::string ControlModeName(int domain_id);
 
@@ -40,11 +42,13 @@ class AdamCommand {
                      double& x_vel, double& y_vel, double& yaw_vel, bool& balance_control_state,
                      bool& motion_files_enable, int& current_control_mode, std::string& message);
 
-  // domain_id: 0=Traditional MPC, 1=RL
+  // domain_id: 0=Traditional MPC, 1=RL. SetControlMode returns immediately; confirmed_mode is hardware state.
   bool SetControlMode(int domain_id, int& confirmed_mode, std::string& message);
+  // domain_id from DDS rt/control_mode_state (-1 if not yet received)
   bool GetControlState(int& domain_id, std::string& message);
   bool WaitForControlMode(int target_domain_id, int& final_mode, std::string& message,
-                          double timeout_sec = 30.0, double poll_interval_sec = 0.5);
+                          double timeout_sec = kControlModePollTimeoutSec,
+                          double poll_interval_sec = kControlModePollIntervalSec);
   bool SetControlModeAndWait(int domain_id, int& final_mode, std::string& message);
 
   void SetModeAsync(const std::string& mode, std::function<void(bool success, const std::string& message)> callback);

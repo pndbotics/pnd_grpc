@@ -58,9 +58,9 @@ service RobotControl {
 | `1` | RL | 强化学习控制 |
 | `-1` | 未知 | 尚未收到底层 DDS `rt/control_mode_state` 反馈 |
 
-- `SetControlMode`：向 DDS `rt/control_mode_cmd` 下发切换指令，服务端立即返回；硬件切换需数秒。
-- `GetControlState`：读取 DDS `rt/control_mode_state` 的实时反馈。
-- 客户端在 `SetControlMode` 后会**轮询** `GetControlState`（默认 30s 超时），与 Python/C++ 行为一致。
+- `SetControlMode`：向 DDS `rt/control_mode_cmd` 下发切换指令，服务端**立即返回**；`current_mode` 为 hardware 当前值（非 queued 目标）。
+- `GetControlState`：读取 DDS `rt/control_mode_state` 的实时反馈（与 `SetControlModeResponse.current_mode` 同源）。
+- `SetControlModeAndWait` / CLI `SetControlMode` 会**轮询** `GetControlState` 直至 hardware 确认（默认 60s 超时）。
 
 ---
 

@@ -167,15 +167,16 @@ message SetControlModeRequest {
 message SetControlModeResponse {
     bool success = 1;
     string message = 2;
-    int32 current_mode = 3;  // 底层当前确认的控制模式（如超时则返回上次已知状态）
+    // 底层 DDS rt/control_mode_state 最新回报：0=Traditional, 1=RL, -1=尚未收到（非 queued 目标）
+    int32 current_mode = 3;
 }
 /*********************************************************************/
-// GetControlState — 读取 DDS rt/control_mode_state 反馈的控制范式
+// GetControlState — 读取 DDS rt/control_mode_state 反馈的控制范式（与 SetControlModeResponse.current_mode 同源）
 // domain_id: 0=Traditional, 1=RL；-1 表示尚未收到 state
 message GetControlStateRequest {}
 message GetControlStateResponse {
     bool success = 1;
-    string message = 2;
+    string message = 2;  // pending 时为 "..., switching to X (DDS retry in progress)"
     int32 domain_id = 3;
 }
 /*********************************************************************/

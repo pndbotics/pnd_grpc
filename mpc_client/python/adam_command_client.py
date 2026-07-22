@@ -8,6 +8,18 @@ import socket
 import time
 
 GRPC_CONNECT_TIMEOUT_SEC = 5
+CONTROL_MODE_POLL_TIMEOUT_SEC = 60  # RL 初始化可能需 10–30s，留足余量
+CONTROL_MODE_POLL_INTERVAL_SEC = 0.5
+
+
+def control_mode_name(mode):
+    if mode == -1:
+        return "Unknown (not yet received)"
+    if mode == 0:
+        return "Traditional"
+    if mode == 1:
+        return "RL"
+    return f"Unknown ({mode})"
 
 
 def is_port_open(host, port, timeout_sec=1.0):
@@ -107,8 +119,8 @@ class AdamCommand(cmd.Cmd):
         print("  SetErrorClear")
         print("  GetStandList")
         print("  GetRobotState")
-        print("  SetControlMode  <0=Traditional|1=RL>  -- switch control paradigm")
-        print("  GetControlState                       -- query current control mode from DDS rt/control_mode_state")
+        print("  SetControlMode  <0=Traditional|1=RL>  -- queue mode switch; poll GetControlState to confirm")
+        print("  GetControlState                       -- hardware mode from DDS rt/control_mode_state (-1=unknown)")
         print("  clear")
         print("  exit")
         self.lastcmd = None
@@ -219,8 +231,8 @@ class AdamCommand(cmd.Cmd):
             elif input_line == "GETCONTROLSTATE":
                 self.get_control_state()
             elif input_line == "SETCONTROLMODE":
-                current_mode = getattr(self, 'current_control_mode', 0)
-                print(f"Current control mode: {current_mode} ({'Traditional' if current_mode == 0 else 'RL'})")
+                current_mode = getattr(self, 'current_control_mode', -1)
+                print(f"Current control mode: {current_mode} ({control_mode_name(current_mode)})")
                 print("Enter control mode (0=Traditional MPC, 1=RL): ")
                 self.pending_command = "SETCONTROLMODE"
                 self.state = "WAIT_PARAMETER"
@@ -426,6 +438,7 @@ class AdamCommand(cmd.Cmd):
     def set_control_mode(self, domain_id):
         """Queue a control paradigm switch: domain_id=0(Traditional), 1(RL).
         Returns immediately with (success, current_mode, message).
+        current_mode reflects hardware (DDS rt/control_mode_state), not the queued target.
         Use wait_for_control_mode() to poll until hardware confirms.
         """
         request = adam_control_pb2.SetControlModeRequest(domain_id=domain_id)
@@ -433,16 +446,17 @@ class AdamCommand(cmd.Cmd):
         self.current_control_mode = response.current_mode
         return response.success, response.current_mode, response.message
 
-    def wait_for_control_mode(self, target_domain_id, timeout_sec=30, poll_interval=0.5):
+    def wait_for_control_mode(self, target_domain_id, timeout_sec=CONTROL_MODE_POLL_TIMEOUT_SEC,
+                              poll_interval=CONTROL_MODE_POLL_INTERVAL_SEC):
         """Poll GetControlState until hardware switches to target_domain_id or timeout.
         Prints live progress. Returns (success, final_mode, message).
         """
-        mode_name = {0: "Traditional", 1: "RL"}
-        target_str = mode_name.get(target_domain_id, str(target_domain_id))
+        target_str = control_mode_name(target_domain_id)
         print(f"  Waiting for hardware to switch to {target_str} "
               f"(timeout={timeout_sec}s, poll every {poll_interval}s)...")
         deadline = time.time() + timeout_sec
         last_printed_mode = None
+        last_printed_detail = None
         elapsed = 0.0
         while time.time() < deadline:
             try:
@@ -450,10 +464,15 @@ class AdamCommand(cmd.Cmd):
                     adam_control_pb2.GetControlStateRequest()
                 )
                 cur = resp.domain_id
-                cur_str = mode_name.get(cur, f"Unknown({cur})")
-                if cur != last_printed_mode:
-                    print(f"  [{elapsed:5.1f}s] Current mode: {cur} ({cur_str})")
+                cur_str = control_mode_name(cur)
+                detail = resp.message or ""
+                status_line = f"  [{elapsed:5.1f}s] Current mode: {cur} ({cur_str})"
+                if detail and detail not in (cur_str, "Traditional", "RL"):
+                    status_line += f" — {detail}"
+                if cur != last_printed_mode or detail != last_printed_detail:
+                    print(status_line)
                     last_printed_mode = cur
+                    last_printed_detail = detail
                 if cur == target_domain_id:
                     self.current_control_mode = cur
                     return True, cur, f"Switched to {target_str} successfully."
@@ -465,12 +484,15 @@ class AdamCommand(cmd.Cmd):
         try:
             resp = self.stub.GetControlState(adam_control_pb2.GetControlStateRequest())
             cur = resp.domain_id
+            detail = resp.message or ""
         except Exception:
             cur = getattr(self, "current_control_mode", -1)
-        cur_str = mode_name.get(cur, f"Unknown({cur})")
+            detail = ""
+        cur_str = control_mode_name(cur)
+        extra = f" ({detail})" if detail else ""
         return False, cur, (
-            f"Timeout ({timeout_sec}s): hardware still in mode={cur} ({cur_str}). "
-            f"Switch may still be in progress — use GetControlState to verify."
+            f"Timeout ({timeout_sec}s): hardware still in mode={cur} ({cur_str}){extra}. "
+            f"若底层 RL 未部署或 DDS 未连通，切换不会成功；可用 GetControlState 继续确认。"
         )
 
     def get_control_state(self):
@@ -480,17 +502,13 @@ class AdamCommand(cmd.Cmd):
         request = adam_control_pb2.GetControlStateRequest()
         response = self.stub.GetControlState(request)
         mode = response.domain_id
-        if mode == -1:
-            mode_str = "Unknown (not yet received)"
-        elif mode == 0:
-            mode_str = "Traditional"
-        elif mode == 1:
-            mode_str = "RL"
-        else:
-            mode_str = f"Unknown ({mode})"
+        mode_str = control_mode_name(mode)
         print(f"Control State: domain_id={mode} ({mode_str})")
-        if not response.success:
+        if response.message:
             print(f"  Message: {response.message}")
+        if not response.success:
+            print(f"  Warning: success=false")
+        self.current_control_mode = mode
 
     def get_stand_list(self):
         request = adam_control_pb2.GetStandListRequest()
@@ -572,7 +590,7 @@ class AdamCommand(cmd.Cmd):
             print(f"Yaw Velocity: {response.yaw_vel}")
             print(f"Balance Control State: {response.balance_control_state}")
             ctrl_mode = response.current_control_mode
-            print(f"Control Mode: {ctrl_mode} ({'Traditional' if ctrl_mode == 0 else 'RL'})")
+            print(f"Control Mode: {ctrl_mode} ({control_mode_name(ctrl_mode)})")
 
     def complete(self, text, state):
         """Override the complete method to handle custom completion logic."""
@@ -614,13 +632,10 @@ def _do_set_control_mode(client, domain_id):
     """Shared logic for SetControlMode used by both handle_parameter and execute_command.
 
     Flow:
-      1. Call set_control_mode() to queue the DDS command (returns immediately on new server,
-         or after a 5 s wait on old server).
-      2. If server says 'already at target' (cur_mode == domain_id): done.
+      1. Call set_control_mode() to queue the DDS command (returns immediately).
+      2. If server says 'already at target': done.
       3. For parameter-validation errors: print and return.
-      4. Otherwise (whether ok or not): the DDS cmd was sent; poll wait_for_control_mode()
-         so the function works correctly even when the old server times out before hardware
-         finishes switching.
+      4. Otherwise poll wait_for_control_mode() until hardware confirms.
     Returns (success, message).
     """
     target_str = "Traditional" if domain_id == 0 else "RL"
@@ -631,14 +646,14 @@ def _do_set_control_mode(client, domain_id):
         print(f"Failed: {msg}")
         return False, msg
 
-    # Server confirmed we are already at the target mode
-    if cur_mode == domain_id:
+    if cur_mode == domain_id and ("Already" in msg or "already" in msg):
         print(f"Already in {target_str} mode.")
         return True, f"Already in {target_str} mode."
 
-    # If old server returned a timeout error, note it and continue polling —
-    # the DDS command was already sent; hardware is (or will be) switching.
-    if not ok:
+    # 命令已入队，打印服务端反馈并轮询 hardware
+    if ok:
+        print(f"  {msg}")
+    else:
         print(f"  Note: {msg}")
         print(f"  Polling hardware state (DDS command was sent)...")
 

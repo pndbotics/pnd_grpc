@@ -238,16 +238,23 @@ bool AdamCommand::WaitForControlMode(int target_domain_id, int& final_mode, std:
 
   const auto start = std::chrono::steady_clock::now();
   int last_printed_mode = -2;
+  std::string last_printed_detail;
   while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < timeout_sec) {
     int domain_id = -1;
     std::string poll_message;
     if (GetControlState(domain_id, poll_message)) {
-      if (domain_id != last_printed_mode) {
+      if (domain_id != last_printed_mode || poll_message != last_printed_detail) {
         const double elapsed =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         std::cout << "  [" << elapsed << "s] Current mode: " << domain_id << " ("
-                  << ControlModeName(domain_id) << ")" << std::endl;
+                  << ControlModeName(domain_id) << ")";
+        if (!poll_message.empty() && poll_message != ControlModeName(domain_id) &&
+            poll_message != "Traditional" && poll_message != "RL") {
+          std::cout << " — " << poll_message;
+        }
+        std::cout << std::endl;
         last_printed_mode = domain_id;
+        last_printed_detail = poll_message;
       }
       if (domain_id == target_domain_id) {
         final_mode = domain_id;
@@ -264,10 +271,11 @@ bool AdamCommand::WaitForControlMode(int target_domain_id, int& final_mode, std:
   if (!GetControlState(final_mode, poll_message)) {
     final_mode = -1;
   }
+  const std::string extra = poll_message.empty() ? "" : " (" + poll_message + ")";
   message = "Timeout (" + std::to_string(static_cast<int>(timeout_sec)) +
             "s): hardware still in mode=" + std::to_string(final_mode) + " (" +
-            ControlModeName(final_mode) +
-            "). Switch may still be in progress — use GetControlState to verify.";
+            ControlModeName(final_mode) + ")" + extra +
+            ". 若底层 RL 未部署或 DDS 未连通，切换不会成功；可用 GetControlState 继续确认。";
   return false;
 }
 
@@ -280,13 +288,16 @@ bool AdamCommand::SetControlModeAndWait(int domain_id, int& final_mode, std::str
     return false;
   }
 
-  if (confirmed_mode == domain_id) {
+  if (confirmed_mode == domain_id &&
+      (message.find("Already") != std::string::npos || message.find("already") != std::string::npos)) {
     final_mode = confirmed_mode;
     message = "Already in " + target_str + " mode.";
     return true;
   }
 
-  if (!ok) {
+  if (ok) {
+    std::cout << "  " << message << std::endl;
+  } else {
     std::cout << "  Note: " << message << std::endl;
     std::cout << "  Polling hardware state (DDS command was sent)..." << std::endl;
   }
